@@ -2,15 +2,14 @@
 #define motor_setting
 
 #include "Arduino.h"
-//#include "motor.h"
 #include "config_set.h"
 
 
 extern void motor_settings();
 void jogMotors();
-//float parseNumber(char code, float val);
 //#include <robot_polargraph.h>
 //#include "WString.h"
+
 
 #define MAX_BUF 64
 
@@ -50,6 +49,8 @@ long last_cmd_time;
 long line_number = 0;
 int robot_uid = 0;
 
+uint8_t lastGcommand=-1;
+
 //Axis axies[NUM_AXIES];
 
 
@@ -61,6 +62,17 @@ struct Motor{
 };
 
 struct Motor motors[NUM_MOTORS+NUM_SERVOS];
+struct Axis{
+ uint8_t pos;
+ uint8_t homePos;
+
+};
+struct Axis axies[NUM_AXIES];
+
+extern void axis_setting()
+{
+  //axies[0]
+}
 
 extern void motor_settings()
 {
@@ -105,13 +117,67 @@ float step_delay;
 //float MM_PER_STEP= 0.025; //verify via equations 
 
 
+
 void get_end_plus_offset(float *results) {
   int i;
   for (i = 0; i < NUM_AXIES; ++i) {
-    //results[i] = tool_offset[current_tool][i] + axies[i].pos;
-    //results[i] = tool_offset[current_tool][i] + axies[i].pos;
+    results[i] = tool_offset[current_tool][i] + axies[i].pos;
+   
   }
 }
+
+/**
+   Move the pen holder in a straight line using bresenham's algorithm
+   @input pos NUM_AXIES floats describing destination coordinates
+   @input new_feed_rate speed to travel along arc
+*/
+void lineSafe(float *pos, float new_feed_rate) {
+  float destination[NUM_AXIES];
+  int i;
+  for (i = 0; i < NUM_AXIES; ++i) {
+    destination[i] = pos[i] - tool_offset[current_tool][i];
+    // @TODO confirm destination is within max/min limits.
+  }
+
+//#ifdef SUBDIVIDE_LINES
+  // split up long lines to make them straighter
+  float delta[NUM_AXIES];
+  float startPos[NUM_AXIES];
+  float temp[NUM_AXIES];
+  float len = 0;
+  for (i = 0; i < NUM_AXIES; ++i) {
+    startPos[i] = axies[i].pos;
+    delta[i] = destination[i] - startPos[i];
+    len += sq(delta[i]);
+  }
+  
+
+  // What if some axies don't need subdividing?  like z axis on polargraph.
+  // often SEGMENT_PER_CM_LINE is 10mm or 20mm.  but a servo movement can be 90-160=70, or 7 segments.  This is pretty nuts.
+  // discount the z movement from the subdivision to use less segments and (I hope) move the servo faster.
+  len -= sq(delta[2]);
+  delta[2] = 0;
+
+
+  len = sqrt(len);  //mm
+  int pieces = ceil(len / SEGMENT_MAX_LENGTH_MM );
+  float a;
+  long j;
+
+  // draw everything up to (but not including) the destination.
+  for (j = 1; j < pieces; ++j) {
+    a = (float)j / (float)pieces;
+    for (i = 0; i < NUM_AXIES; ++i) {
+      temp[i] = delta[i] * a + startPos[i];
+    }
+    //motor_line(temp, new_feed_rate);
+  }
+///#endif
+
+  // guarantee we stop exactly at the destination (no rounding errors).
+  //motor_line(destination, new_feed_rate);
+}
+
 
 float parseNumber(char code, float val) {
   char *ptr = serialBuffer; // start at the beginning of buffer
@@ -130,7 +196,7 @@ float parseNumber(char code, float val) {
    straight lines.  distance in mm.
 */
 
-/*void parseLine() {
+void parseLine() {
   float offset[NUM_AXIES];
   get_end_plus_offset(offset);
   acceleration = parseNumber('A', acceleration);
@@ -144,8 +210,8 @@ float parseNumber(char code, float val) {
     pos[i] = parseNumber(AxisNames[i], (absolute_mode ? offset[i] : 0)) + (absolute_mode ? 0 : offset[i]);
   }
 
- // lineSafe( pos, f );
-}*/
+  lineSafe( pos, f );
+}
 
 
 
@@ -268,10 +334,21 @@ if(!strncmp(serialBuffer, "UID", 3)){robot_uid = atoi(strchr(serialBuffer, ' ')+
     //case   6:  toolChange(parseNumber('T', current_tool));  break;
     //case  17:  motor_engage();  break;
   }
+
+    if(cmd!=-1) return;  // M command processed, stop.
  // D codes
  cmd = parseNumber('D', -1);
   switch (cmd) {
     case  0:jogMotors();break;
+  }
+    if(cmd!=-1) return;  // D command processed, stop.
+
+  cmd = parseNumber('G', lastGcommand);
+  lastGcommand=-1;
+  switch (cmd) {
+    case  0:  
+    case  1:  parseLine();  lastGcommand=cmd;  break;
+    //case  2:  parseArc(1);  lastGcommand=cmd;  break;  // clockwise
   }
 
 

@@ -6,7 +6,7 @@ float MM_PER_STEP  = 0.025; //verify via equations
 #define MAX_ACCELERATION     (500.0)
 #define MIN_ACCELERATION     (0.0)
 #define NUM_TOOLS            (1)
-
+#define SEGMENT_MAX_LENGTH_MM  (20)
 
 /*********** measurements of the machine ******************/
 // physical measurements of the machine
